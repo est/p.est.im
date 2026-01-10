@@ -101,12 +101,38 @@ function generateId(length: number = 6): string {
 	return result;
 }
 
+function escapeHtml(str: string): string {
+	return str
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;")
+		.replace(/'/g, "&#039;");
+}
+
+function SecureResponse(body: BodyInit | null, init?: ResponseInit & { isHtml?: boolean }): Response {
+	const { isHtml, ...rest } = init || {};
+	const res = new Response(body, rest);
+	const headers = new Headers(res.headers);
+	headers.set("X-Content-Type-Options", "nosniff");
+	headers.set("X-Frame-Options", "DENY");
+	headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+
+	if (isHtml) {
+		headers.set("Content-Security-Policy", "default-src 'none'; script-src https://cdnjs.cloudflare.com; style-src 'unsafe-inline' https://cdnjs.cloudflare.com; img-src *; font-src https://cdnjs.cloudflare.com;");
+	} else {
+		headers.set("Content-Security-Policy", "default-src 'none'; script-src 'none'; style-src 'none'; img-src 'self';");
+	}
+
+	return new Response(res.body, { ...rest, status: res.status, statusText: res.statusText, headers });
+}
+
 const MD_HTML_TEMPLATE = (title: string, content: string) => `<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>${title}</title>
+    <title>${escapeHtml(title)}</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown.min.css">
     <style>
         .markdown-body { box-sizing: border-box; min-width: 200px; max-width: 980px; margin: 0 auto; padding: 45px; }
@@ -114,16 +140,17 @@ const MD_HTML_TEMPLATE = (title: string, content: string) => `<!DOCTYPE html>
     </style>
 </head>
 <body class="markdown-body">
-    <div id="content" style="display:none">${content}</div>
+    <div id="content" style="display:none">${escapeHtml(content)}</div>
     <div id="view"></div>
     <div id="meta" style="margin-top: 2rem; border-top: 1px solid #eee; padding-top: 1rem; color: #666; font-size: 0.8rem;">
         Views: <span id="view-count">__VIEWS__</span>
     </div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
     <script>
         const content = document.getElementById('content').textContent;
-        document.getElementById('view').innerHTML = marked.parse(content);
-        // We could pass the view count here if we wanted, but for now let's just make it look nice
+        const html = marked.parse(content);
+        document.getElementById('view').innerHTML = DOMPurify.sanitize(html);
     </script>
 </body>
 </html>`;
@@ -139,7 +166,7 @@ export default {
 
 		if (url.pathname === "/" && request.method === "GET") {
 			console.log("Redirecting to", GITHUB_REDIRECT);
-			return Response.redirect(GITHUB_REDIRECT, 302);
+			return SecureResponse(null, { status: 302, headers: { Location: GITHUB_REDIRECT } });
 		}
 
 		const id = url.pathname.slice(1);
@@ -152,7 +179,7 @@ export default {
 			if (fetchSite && fetchSite !== "same-origin" && fetchSite !== "same-site") {
 				if (fetchDest && fetchDest !== "document") {
 					// Forbidden: Hot-linking detected
-					return new Response("", { status: 403 });
+					return SecureResponse("", { status: 403 });
 				}
 			}
 
@@ -166,13 +193,13 @@ export default {
 			).bind(id).first<any>();
 
 			if (!paste) {
-				return new Response("Paste not found", { status: 404 });
+				return SecureResponse("Paste not found", { status: 404 });
 			}
 
 			const now = Math.floor(Date.now() / 1000);
 			if (paste.etime < now) {
 				ctx.waitUntil(env.DB.prepare("DELETE FROM pastes WHERE id = ?").bind(id).run());
-				return new Response("Paste has expired", { status: 410 });
+				return SecureResponse("Paste has expired", { status: 410 });
 			}
 
 			const newExpiresAt = now + EXPIRATION_TTL;
@@ -193,8 +220,9 @@ export default {
 				let html = MD_HTML_TEMPLATE(id, rawText);
 				// Inject real view count into template
 				html = html.replace("__VIEWS__", newViews.toString());
-				return new Response(html, {
-					headers: { "Content-Type": "text/html;charset=UTF-8" }
+				return SecureResponse(html, {
+					headers: { "Content-Type": "text/html;charset=UTF-8" },
+					isHtml: true,
 				});
 			}
 
@@ -209,7 +237,7 @@ export default {
 				responseHeaders["X-Image-Dimensions"] = `${systemInfo.width}x${systemInfo.height}`;
 			}
 
-			const response = new Response(new Uint8Array(paste.content), {
+			const response = SecureResponse(new Uint8Array(paste.content), {
 				headers: responseHeaders,
 			});
 
@@ -315,9 +343,9 @@ export default {
 			await env.DB.prepare("DELETE FROM pastes WHERE id = ?").bind(id).run();
 			ctx.waitUntil(cache.delete(new Request(url.origin + "/" + id)));
 
-			return new Response("Deleted\n");
+			return SecureResponse("Deleted\n");
 		}
 
-		return new Response("Method not allowed", { status: 405 });
+		return SecureResponse("Method not allowed", { status: 405 });
 	},
 };

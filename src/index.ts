@@ -139,6 +139,17 @@ export default {
 		const id = url.pathname.slice(1);
 
 		if (request.method === "GET" && id) {
+			// Hot-linking protection: allow direct access (no Sec-Fetch headers) or same-site.
+			// Otherwise enforce Sec-Fetch-Dest: document.
+			const fetchSite = request.headers.get("Sec-Fetch-Site");
+			const fetchDest = request.headers.get("Sec-Fetch-Dest");
+			if (fetchSite && fetchSite !== "same-origin" && fetchSite !== "same-site") {
+				if (fetchDest && fetchDest !== "document") {
+					// Forbidden: Hot-linking detected
+					return new Response("", { status: 403 });
+				}
+			}
+
 			const cachedResponse = await cache.match(request);
 			if (cachedResponse) {
 				return cachedResponse;

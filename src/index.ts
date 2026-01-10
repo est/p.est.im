@@ -16,11 +16,22 @@ interface ContentInfo {
 	height?: number;
 }
 
+// @ts-ignore
+if (typeof Uint8Array.prototype.toHex !== "function") {
+	// @ts-ignore
+	Uint8Array.prototype.toHex = function () {
+		return Array.from(this).map(b => b.toString(16).padStart(2, "0")).join("");
+	};
+}
+
 function analyzeContent(buffer: ArrayBuffer): ContentInfo {
 	const bytes = new Uint8Array(buffer);
+	const headerText = new TextDecoder().decode(bytes.slice(0, 16));
+	// @ts-ignore
+	const headerHex = bytes.slice(0, 16).toHex();
 
-	// PNG: 89 50 4E 47 0D 0A 1A 0A
-	if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47) {
+	// PNG: 89504e47
+	if (headerHex.startsWith("89504e47")) {
 		const view = new DataView(buffer);
 		return {
 			mime: "image/png",
@@ -30,8 +41,8 @@ function analyzeContent(buffer: ArrayBuffer): ContentInfo {
 		};
 	}
 
-	// GIF: GIF87a (47 49 46 38 37 61) or GIF89a (47 49 46 38 39 61)
-	if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x38) {
+	// GIF: GIF8
+	if (headerText.startsWith("GIF8")) {
 		const view = new DataView(buffer);
 		return {
 			mime: "image/gif",
@@ -41,16 +52,16 @@ function analyzeContent(buffer: ArrayBuffer): ContentInfo {
 		};
 	}
 
-	// JPEG: FF D8 FF
-	if (bytes[0] === 0xFF && bytes[1] === 0xD8 && bytes[2] === 0xFF) {
+	// JPEG: ffd8ff
+	if (headerHex.startsWith("ffd8ff")) {
 		let offset = 2;
 		const view = new DataView(buffer);
 		while (offset < bytes.length) {
 			const marker = view.getUint16(offset, false);
 			offset += 2;
-			// SOF0 - SOF15 (FF C0 - FF CF, except FF C4, FF C8, FF CC)
+			// SOF0 - SOF15
 			if ((marker >= 0xFFC0 && marker <= 0xFFCF) && marker !== 0xFFC4 && marker !== 0xFFC8 && marker !== 0xFFCC) {
-				offset += 1; // skip precision
+				offset += 1;
 				const height = view.getUint16(offset, false);
 				const width = view.getUint16(offset + 2, false);
 				return { mime: "image/jpeg", extension: ".jpg", width, height };
@@ -61,10 +72,9 @@ function analyzeContent(buffer: ArrayBuffer): ContentInfo {
 	}
 
 	// WEBP: RIFF .... WEBP
-	if (bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
-		bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) {
+	if (headerText.startsWith("RIFF") && headerText.slice(8, 12) === "WEBP") {
 		const view = new DataView(buffer);
-		const type = String.fromCharCode(...bytes.slice(12, 16));
+		const type = headerText.slice(12, 16);
 		if (type === "VP8 ") {
 			const tmp = view.getUint32(26, true);
 			return { mime: "image/webp", extension: ".webp", width: tmp & 0x3FFF, height: (tmp >> 16) & 0x3FFF };
@@ -173,8 +183,8 @@ export default {
 				"X-Paste-Expires-At": new Date(paste.expires_at * 1000).toISOString(),
 			};
 
-			if (systemInfo.dimensions) {
-				responseHeaders["X-Image-Dimensions"] = `${systemInfo.dimensions.width}x${systemInfo.dimensions.height}`;
+			if (systemInfo.width && systemInfo.height) {
+				responseHeaders["X-Image-Dimensions"] = `${systemInfo.width}x${systemInfo.height}`;
 			}
 
 			const response = new Response(new Uint8Array(paste.content), {
@@ -211,7 +221,8 @@ export default {
 			const systemInfo = JSON.stringify({
 				mime,
 				deleteToken,
-				dimensions: info.width ? { width: info.width, height: info.height } : undefined
+				width: info.width,
+				height: info.height
 			});
 
 			try {

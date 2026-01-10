@@ -1,4 +1,4 @@
-# my-paste-service.workers.dev - Serverless Paste Service
+# your-paste-service.workers.dev - Serverless Paste Service
 
 paste service running on Cloudflare Workers and D1.
 
@@ -6,7 +6,7 @@ paste service running on Cloudflare Workers and D1.
 
 Provide a zero-friction way to publish temporary outputs online directly from the command line.
 
-`cmd | curl -T - https://my-paste-service.workers.dev`
+`cmd | curl -T - https://your-paste-service.workers.dev`
 
 ## Design Rationale
 
@@ -22,25 +22,25 @@ Provide a zero-friction way to publish temporary outputs online directly from th
 
 ### Simple Upload (Random ID)
 ```bash
-echo "Hello World" | curl -T - https://my-paste-service.workers.dev
+echo "Hello World" | curl -T - https://your-paste-service.workers.dev
 ```
 
 ### Upload Image/Binary
 Automatically detects file types (PNG, JPEG, GIF, WEBP) and extracts dimensions.
 ```bash
-curl -T image.png https://my-paste-service.workers.dev
+curl -T image.png https://your-paste-service.workers.dev
 ```
 
 ### Markdown Rendering
 Automatically renders as HTML in browsers if the ID ends with `.md`.
 ```bash
-echo "# Hello" | curl -T - https://my-paste-service.workers.dev/test.md
+echo "# Hello" | curl -T - https://your-paste-service.workers.dev/test.md
 ```
 
 ### Deleting a Paste
 The upload response includes an `X-Delete-Token` (also available via metadata if requested).
 ```bash
-curl -X DELETE -H "X-Delete-Token: <your-token>" https://my-paste-service.workers.dev/<id>
+curl -X DELETE -H "X-Delete-Token: <your-token>" https://your-paste-service.workers.dev/<id>
 ```
 
 ## Local Development

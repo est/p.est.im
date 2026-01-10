@@ -1,59 +1,52 @@
-# Worker + D1 Database
+# my-paste-service.workers.dev - Serverless Paste Service
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/cloudflare/templates/tree/main/d1-template)
+paste service running on Cloudflare Workers and D1.
 
-![Worker + D1 Template Preview](https://imagedelivery.net/wSMYJvS3Xw-n339CbDyDIA/cb7cb0a9-6102-4822-633c-b76b7bb25900/public)
+## Objective
 
-<!-- dash-content-start -->
+Provide a zero-friction way to publish temporary outputs online directly from the command line.
 
-D1 is Cloudflare's native serverless SQL database ([docs](https://developers.cloudflare.com/d1/)). This project demonstrates using a Worker with a D1 binding to execute a SQL statement. A simple frontend displays the result of this query:
+`cmd | curl -T - https://my-paste-service.workers.dev`
 
-```SQL
-SELECT * FROM comments LIMIT 3;
+## Design Rationale
+
+- **D1-only Storage**: To minimize complexity and stay within the Cloudflare free tier, both paste content (as `BLOB`) and metadata are stored in D1. This avoids the overhead of managing R2 while providing sufficient capacity for small pastes (up to 1MB).
+- **Aggressive Caching**: To "save cost at all costs," the service leverages the Cloudflare Cache API. Once a paste is fetched from D1, it is cached at the edge until expiration, drastically reducing D1 read operations.
+- **Granular Metadata**: Metadata is split into functional fields (`uploader_info`, `counters`, `system_info`) stored as JSON. This keeps the schema clean while allowing for flexible tracking of IP addresses, view counts, and MIME types.
+- **Automatic Expiration**: All pastes are set to expire after 24 hours by default to prevent storage bloat and ensure privacy for temporary data.
+- **Zero Dependencies**: Built with vanilla TypeScript and standard Cloudflare Worker APIs. No external libraries are used, ensuring a tiny footprint and maximum performance.
+
+## Usage
+
+### Simple Upload (Random ID)
+```bash
+echo "Hello World" | curl -T - https://my-paste-service.workers.dev
 ```
 
-The D1 database is initialized with a `comments` table and this data:
-
-```SQL
-INSERT INTO comments (author, content)
-VALUES
-    ('Kristian', 'Congrats!'),
-    ('Serena', 'Great job!'),
-    ('Max', 'Keep up the good work!')
-;
+### Upload Image/Binary
+```bash
+curl -T image.png -H "Content-Type: image/png" https://my-paste-service.workers.dev
 ```
 
-> [!IMPORTANT]
-> When using C3 to create this project, select "no" when it asks if you want to deploy. You need to follow this project's [setup steps](https://github.com/cloudflare/templates/tree/main/d1-template#setup-steps) before deploying.
-
-<!-- dash-content-end -->
-
-## Getting Started
-
-Outside of this repo, you can start a new project with this template using [C3](https://developers.cloudflare.com/pages/get-started/c3/) (the `create-cloudflare` CLI):
-
-```
-npm create cloudflare@latest -- --template=cloudflare/templates/d1-template
+### Deleting a Paste
+The upload response includes an `X-Delete-Token` (also available via metadata if requested).
+```bash
+curl -X DELETE -H "X-Delete-Token: <your-token>" https://my-paste-service.workers.dev/<id>
 ```
 
-A live public deployment of this template is available at [https://d1-template.templates.workers.dev](https://d1-template.templates.workers.dev)
+## Local Development
 
-## Setup Steps
+### Prerequisites
+- Node.js
+- pnpm
 
-1. Install the project dependencies with a package manager of your choice:
-   ```bash
-   npm install
-   ```
-2. Create a [D1 database](https://developers.cloudflare.com/d1/get-started/) with the name "d1-template-database":
-   ```bash
-   npx wrangler d1 create d1-template-database
-   ```
-   ...and update the `database_id` field in `wrangler.json` with the new database ID.
-3. Run the following db migration to initialize the database (notice the `migrations` directory in this project):
-   ```bash
-   npx wrangler d1 migrations apply --remote d1-template-database
-   ```
-4. Deploy the project!
-   ```bash
-   npx wrangler deploy
-   ```
+### Setup
+1. Clone the repository.
+2. Install dependencies: `pnpm install`.
+3. Apply local migrations: `npx wrangler d1 migrations apply DB --local`.
+4. Run dev server: `npm run dev`.
+
+### Testing Locally
+```bash
+echo "test" | curl -T - http://localhost:8787/
+```

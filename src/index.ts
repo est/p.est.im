@@ -5,7 +5,7 @@ export interface Env {
 	MAX_SIZE?: string;
 }
 
-const DEFAULT_GITHUB_REDIRECT = "https://github.com/yi-ge/p.est.im";
+const DEFAULT_GITHUB_REDIRECT = "https://github.com/est/p.est.im";
 const DEFAULT_EXPIRATION_TTL = 24 * 60 * 60; // 24 hours in seconds
 const DEFAULT_MAX_SIZE = 1 * 1024 * 1024; // 1MB size limit
 
@@ -208,7 +208,7 @@ export default {
 			}
 
 			const info = analyzeContent(content);
-			const pasteId = id || (generateId() + info.extension);
+			const originalPath = id; // The path provided by the user
 			const mime = info.mime;
 			const deleteToken = crypto.randomUUID();
 			const expiresAt = Math.floor(Date.now() / 1000) + EXPIRATION_TTL;
@@ -221,26 +221,39 @@ export default {
 			const systemInfo = JSON.stringify({
 				mime,
 				deleteToken,
+				original_path: originalPath,
 				width: info.width,
 				height: info.height
 			});
 
-			try {
-				await env.DB.prepare(
-					"INSERT INTO pastes (id, content, uploader_info, counters, system_info, expires_at) VALUES (?, ?, ?, ?, ?, ?)"
-				).bind(
-					pasteId,
-					content,
-					uploaderInfo,
-					initialCounters,
-					systemInfo,
-					expiresAt
-				).run();
-			} catch (e: any) {
-				if (e.message.includes("UNIQUE constraint failed")) {
-					return new Response("Paste ID already exists", { status: 409 });
+			let pasteId = "";
+			let attempts = 0;
+			const maxAttempts = 3;
+
+			while (attempts < maxAttempts) {
+				pasteId = generateId() + info.extension;
+				try {
+					await env.DB.prepare(
+						"INSERT INTO pastes (id, content, uploader_info, counters, system_info, expires_at) VALUES (?, ?, ?, ?, ?, ?)"
+					).bind(
+						pasteId,
+						content,
+						uploaderInfo,
+						initialCounters,
+						systemInfo,
+						expiresAt
+					).run();
+					break; // Success
+				} catch (e: any) {
+					if (e.message.includes("UNIQUE constraint failed")) {
+						attempts++;
+						if (attempts >= maxAttempts) {
+							return new Response("Failed to generate a unique ID, please try again", { status: 500 });
+						}
+						continue;
+					}
+					throw e;
 				}
-				throw e;
 			}
 
 			const baseUrl = new URL(request.url).origin;

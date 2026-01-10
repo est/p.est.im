@@ -116,9 +116,14 @@ const MD_HTML_TEMPLATE = (title: string, content: string) => `<!DOCTYPE html>
 <body class="markdown-body">
     <div id="content" style="display:none">${content}</div>
     <div id="view"></div>
+    <div id="meta" style="margin-top: 2rem; border-top: 1px solid #eee; padding-top: 1rem; color: #666; font-size: 0.8rem;">
+        Views: <span id="view-count">__VIEWS__</span>
+    </div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
     <script>
-        document.getElementById('view').innerHTML = marked.parse(document.getElementById('content').textContent);
+        const content = document.getElementById('content').textContent;
+        document.getElementById('view').innerHTML = marked.parse(content);
+        // We could pass the view count here if we wanted, but for now let's just make it look nice
     </script>
 </body>
 </html>`;
@@ -133,6 +138,7 @@ export default {
 		const cache = caches.default;
 
 		if (url.pathname === "/" && request.method === "GET") {
+			console.log("Redirecting to", GITHUB_REDIRECT);
 			return Response.redirect(GITHUB_REDIRECT, 302);
 		}
 
@@ -156,7 +162,7 @@ export default {
 			}
 
 			const paste = await env.DB.prepare(
-				"SELECT content, system_info, counters, expires_at FROM pastes WHERE id = ?"
+				"SELECT content, system_info, counters, etime FROM pastes WHERE id = ?"
 			).bind(id).first<any>();
 
 			if (!paste) {
@@ -164,34 +170,39 @@ export default {
 			}
 
 			const now = Math.floor(Date.now() / 1000);
-			if (paste.expires_at < now) {
+			if (paste.etime < now) {
 				ctx.waitUntil(env.DB.prepare("DELETE FROM pastes WHERE id = ?").bind(id).run());
 				return new Response("Paste has expired", { status: 410 });
 			}
 
+			const newExpiresAt = now + EXPIRATION_TTL;
 			const systemInfo = JSON.parse(paste.system_info);
 			const counters = JSON.parse(paste.counters);
+			const newViews = (counters.views || 0) + 1;
 
 			ctx.waitUntil((async () => {
-				const newCounters = { ...counters, views: (counters.views || 0) + 1 };
-				await env.DB.prepare("UPDATE pastes SET counters = ? WHERE id = ?")
-					.bind(JSON.stringify(newCounters), id)
+				const newCounters = { ...counters, views: newViews };
+				await env.DB.prepare("UPDATE pastes SET counters = ?, atime = ?, etime = ? WHERE id = ?")
+					.bind(JSON.stringify(newCounters), now, newExpiresAt, id)
 					.run();
 			})());
 
 			const accept = request.headers.get("Accept") || "";
 			if (id.endsWith(".md") && accept.includes("text/html")) {
 				const rawText = new TextDecoder().decode(new Uint8Array(paste.content));
-				return new Response(MD_HTML_TEMPLATE(id, rawText), {
+				let html = MD_HTML_TEMPLATE(id, rawText);
+				// Inject real view count into template
+				html = html.replace("__VIEWS__", newViews.toString());
+				return new Response(html, {
 					headers: { "Content-Type": "text/html;charset=UTF-8" }
 				});
 			}
 
 			const responseHeaders: any = {
 				"Content-Type": systemInfo.mime || "text/plain",
-				"Cache-Control": `public, max-age=${Math.max(0, paste.expires_at - now)}`,
-				"X-Paste-Views": (counters.views + 1).toString(),
-				"X-Paste-Expires-At": new Date(paste.expires_at * 1000).toISOString(),
+				"Cache-Control": `public, max-age=${Math.max(0, newExpiresAt - now)}`,
+				"X-Paste-Views": newViews.toString(),
+				"X-Paste-Expires-At": new Date(newExpiresAt * 1000).toISOString(),
 			};
 
 			if (systemInfo.width && systemInfo.height) {
@@ -204,6 +215,7 @@ export default {
 
 			ctx.waitUntil(cache.put(request, response.clone()));
 
+			console.log("Returning response for", id);
 			return response;
 		}
 
@@ -218,11 +230,23 @@ export default {
 				return new Response("Content too large", { status: 413 });
 			}
 
+			const now = Math.floor(Date.now() / 1000);
+			// Proactive cleanup of expired pastes
+			ctx.waitUntil(env.DB.prepare("DELETE FROM pastes WHERE etime < ?").bind(now).run());
+
 			const info = analyzeContent(content);
 			const originalPath = id; // The path provided by the user
+			let extension = info.extension;
+			if (!extension && originalPath.includes(".")) {
+				const ext = "." + originalPath.split(".").pop();
+				if ([".md", ".txt", ".json", ".html", ".js", ".css"].includes(ext.toLowerCase())) {
+					extension = ext.toLowerCase();
+				}
+			}
+
 			const mime = info.mime;
 			const deleteToken = crypto.randomUUID();
-			const expiresAt = Math.floor(Date.now() / 1000) + EXPIRATION_TTL;
+			const expiresAt = now + EXPIRATION_TTL;
 
 			const uploaderInfo = JSON.stringify({
 				ip: request.headers.get("CF-Connecting-IP"),
@@ -242,10 +266,10 @@ export default {
 			const maxAttempts = 3;
 
 			while (attempts < maxAttempts) {
-				pasteId = generateId() + info.extension;
+				pasteId = generateId() + extension;
 				try {
 					await env.DB.prepare(
-						"INSERT INTO pastes (id, content, uploader_info, counters, system_info, expires_at) VALUES (?, ?, ?, ?, ?, ?)"
+						"INSERT INTO pastes (id, content, uploader_info, counters, system_info, etime) VALUES (?, ?, ?, ?, ?, ?)"
 					).bind(
 						pasteId,
 						content,

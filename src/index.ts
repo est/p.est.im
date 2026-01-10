@@ -171,6 +171,10 @@ export default {
 
 		const id = url.pathname.slice(1);
 
+		if (url.pathname === "/favicon.ico") {
+			return new Response(null, { status: 204 });
+		}
+
 		if (request.method === "GET" && id) {
 			// Hot-linking protection: allow direct access (no Sec-Fetch headers) or same-site.
 			// Otherwise enforce Sec-Fetch-Dest: document.

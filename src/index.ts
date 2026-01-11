@@ -147,6 +147,7 @@ const MD_HTML_TEMPLATE = (title: string, content: string, nonce: string) => `<!D
         Views: <span id="view-count">__VIEWS__</span>
     </div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
     <script nonce="${nonce}">
 		document.addEventListener("DOMContentLoaded", () => {
 			view.innerHTML = DOMPurify.sanitize(marked.parse(content.textContent))

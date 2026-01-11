@@ -59,3 +59,8 @@ curl -X DELETE -H "X-Delete-Token: <your-token>" https://your-paste-service.work
 ```bash
 echo "test" | curl -T - http://localhost:8787/
 ```
+
+## Other works
+
+- https://github.com/ptpb/pb complicated stack
+- https://paste.rs/ `curl --data-binary` isn't cool

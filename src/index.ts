@@ -296,6 +296,13 @@ export default {
 			const uploaderInfo = JSON.stringify({
 				ip: request.headers.get("CF-Connecting-IP"),
 				ua: request.headers.get("User-Agent"),
+				rtt: request.cf?.clientTcpRtt,
+				asOrg: request.cf?.asOrganization,
+				asn: request.cf?.asn,
+				country: request.cf?.country,
+				region: request.cf?.region,
+				regionCode: request.cf?.regionCode,
+				city: request.cf?.city,
 			});
 			const initialCounters = JSON.stringify({ views: 0 });
 			const systemInfo = JSON.stringify({

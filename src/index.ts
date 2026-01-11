@@ -110,16 +110,17 @@ function escapeHtml(str: string): string {
 		.replace(/'/g, "&#039;");
 }
 
-function SecureResponse(body: BodyInit | null, init?: ResponseInit & { isHtml?: boolean }): Response {
-	const { isHtml, ...rest } = init || {};
+function SecureResponse(body: BodyInit | null, init?: ResponseInit & { htmlNonce?: string }): Response {
+	const { htmlNonce, ...rest } = init || {};
 	const res = new Response(body, rest);
 	const headers = new Headers(res.headers);
 	headers.set("X-Content-Type-Options", "nosniff");
 	headers.set("X-Frame-Options", "DENY");
 	headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
 
-	if (isHtml) {
-		headers.set("Content-Security-Policy", "default-src 'none'; script-src https://cdnjs.cloudflare.com; style-src 'unsafe-inline' https://cdnjs.cloudflare.com; img-src *; font-src https://cdnjs.cloudflare.com;");
+	if (htmlNonce !== undefined) {
+		const scriptSrc = htmlNonce ? `https://cdnjs.cloudflare.com 'nonce-${htmlNonce}'` : "https://cdnjs.cloudflare.com";
+		headers.set("Content-Security-Policy", `default-src 'none'; script-src ${scriptSrc}; style-src 'unsafe-inline' https://cdnjs.cloudflare.com; img-src *; font-src https://cdnjs.cloudflare.com; connect-src https://cdnjs.cloudflare.com;`);
 	} else {
 		headers.set("Content-Security-Policy", "default-src 'none'; script-src 'none'; style-src 'none'; img-src 'self';");
 	}
@@ -127,7 +128,7 @@ function SecureResponse(body: BodyInit | null, init?: ResponseInit & { isHtml?: 
 	return new Response(res.body, { ...rest, status: res.status, statusText: res.statusText, headers });
 }
 
-const MD_HTML_TEMPLATE = (title: string, content: string) => `<!DOCTYPE html>
+const MD_HTML_TEMPLATE = (title: string, content: string, nonce: string) => `<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
@@ -146,8 +147,7 @@ const MD_HTML_TEMPLATE = (title: string, content: string) => `<!DOCTYPE html>
         Views: <span id="view-count">__VIEWS__</span>
     </div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
-    <script>
+    <script nonce="${nonce}">
 		document.addEventListener("DOMContentLoaded", () => {
 			view.innerHTML = DOMPurify.sanitize(marked.parse(content.textContent))
 		});
@@ -236,13 +236,14 @@ export default {
 
 			const accept = request.headers.get("Accept") || "";
 			if (id.endsWith(".md") && accept.includes("text/html")) {
+				const nonce = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))));
 				const rawText = new TextDecoder().decode(new Uint8Array(paste.content));
-				let html = MD_HTML_TEMPLATE(id, rawText);
+				let html = MD_HTML_TEMPLATE(id, rawText, nonce);
 				// Inject real view count into template
 				html = html.replace("__VIEWS__", newViews.toString());
 				return SecureResponse(html, {
 					headers: { "Content-Type": "text/html;charset=UTF-8" },
-					isHtml: true,
+					htmlNonce: nonce,
 				});
 			}
 

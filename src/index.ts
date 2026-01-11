@@ -162,6 +162,16 @@ export default {
 		const MAX_SIZE = parseInt(env.MAX_SIZE || DEFAULT_MAX_SIZE.toString());
 
 		const url = new URL(request.url);
+
+		// Force HTTPS upgrade, especially for uploads
+		if (url.protocol === "http:" && url.hostname !== "localhost") {
+			url.protocol = "https:";
+			return new Response(null, {
+				status: 308,
+				headers: { Location: url.toString() },
+			});
+		}
+
 		const cache = caches.default;
 
 		if (url.pathname === "/" && request.method === "GET") {

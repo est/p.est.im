@@ -172,7 +172,10 @@ export default {
 		const id = url.pathname.slice(1);
 
 		if (url.pathname === "/favicon.ico") {
-			return new Response(null, { status: 204 });
+			const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🅿️</text></svg>`;
+			return new Response(svg, {
+				headers: { "Content-Type": "image/svg+xml" },
+			});
 		}
 
 		if (request.method === "GET" && id) {
@@ -197,13 +200,13 @@ export default {
 			).bind(id).first<any>();
 
 			if (!paste) {
-				return SecureResponse("Paste not found", { status: 404 });
+				return new Response(null, { status: 404 });
 			}
 
 			const now = Math.floor(Date.now() / 1000);
 			if (paste.etime < now) {
 				ctx.waitUntil(env.DB.prepare("DELETE FROM pastes WHERE id = ?").bind(id).run());
-				return SecureResponse("Paste has expired", { status: 410 });
+				return new Response(null, { status: 410 });
 			}
 
 			const newExpiresAt = now + EXPIRATION_TTL;
@@ -293,32 +296,37 @@ export default {
 				height: info.height
 			});
 
-			let pasteId = "";
-			let attempts = 0;
-			const maxAttempts = 3;
-
-			while (attempts < maxAttempts) {
-				pasteId = generateId() + extension;
-				try {
-					await env.DB.prepare(
-						"INSERT INTO pastes (id, content, uploader_info, counters, system_info, etime) VALUES (?, ?, ?, ?, ?, ?)"
-					).bind(
-						pasteId,
-						content,
-						uploaderInfo,
-						initialCounters,
-						systemInfo,
-						expiresAt
-					).run();
-					break; // Success
-				} catch (e: any) {
-					if (e.message.includes("UNIQUE constraint failed")) {
-						attempts++;
-						if (attempts >= maxAttempts) {
-							return new Response("Failed to generate a unique ID, please try again", { status: 500 });
-						}
-						continue;
+			let pasteId = generateId() + extension;
+			try {
+				await env.DB.prepare(
+					"INSERT INTO pastes (id, content, uploader_info, counters, system_info, etime) VALUES (?, ?, ?, ?, ?, ?)"
+				).bind(
+					pasteId,
+					content,
+					uploaderInfo,
+					initialCounters,
+					systemInfo,
+					expiresAt
+				).run();
+			} catch (e: any) {
+				if (e.message.includes("UNIQUE constraint failed")) {
+					const timestamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
+					pasteId = `${timestamp}-${pasteId}`;
+					try {
+						await env.DB.prepare(
+							"INSERT INTO pastes (id, content, uploader_info, counters, system_info, etime) VALUES (?, ?, ?, ?, ?, ?)"
+						).bind(
+							pasteId,
+							content,
+							uploaderInfo,
+							initialCounters,
+							systemInfo,
+							expiresAt
+						).run();
+					} catch (e2: any) {
+						return new Response("Conflict persists after timestamp prefixing", { status: 500 });
 					}
+				} else {
 					throw e;
 				}
 			}

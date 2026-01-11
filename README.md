@@ -47,7 +47,7 @@ curl -X DELETE -H "X-Delete-Token: <your-token>" https://your-paste-service.work
 
 ### Prerequisites
 - Node.js
-- pnpm
+- npx
 
 ### Setup
 1. Clone the repository.

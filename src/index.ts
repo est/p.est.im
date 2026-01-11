@@ -148,9 +148,9 @@ const MD_HTML_TEMPLATE = (title: string, content: string) => `<!DOCTYPE html>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
     <script>
-        const content = document.getElementById('content').textContent;
-        const html = marked.parse(content);
-        document.getElementById('view').innerHTML = DOMPurify.sanitize(html);
+		document.addEventListener("DOMContentLoaded", () => {
+			view.innerHTML = DOMPurify.sanitize(marked.parse(content.textContent))
+		});
     </script>
 </body>
 </html>`;
@@ -184,7 +184,10 @@ export default {
 		if (url.pathname === "/favicon.ico") {
 			const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🅿️</text></svg>`;
 			return new Response(svg, {
-				headers: { "Content-Type": "image/svg+xml" },
+				headers: {
+					"Content-Type": "image/svg+xml",
+					"Cache-Control": `public, max-age=${EXPIRATION_TTL}`
+				},
 			});
 		}
 
